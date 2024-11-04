@@ -49,11 +49,13 @@ pub const TypeMask = enum(u8) {
 pub fn Encoder(comptime WriterType: type) type {
     return struct {
         encoded_writer: WriterType,
+
+        pub const Error = WriterType.Error;
         pub const Writer = WriterType;
 
         const Self = @This();
 
-        pub fn write(self: *Self, value: anytype) !void {
+        pub fn write(self: *Self, value: anytype) Error!void {
             switch (@typeInfo(@TypeOf(value))) {
                 .bool => try self.writeBool(value),
                 .int => try self.writeInt(@TypeOf(value), value),
@@ -69,16 +71,16 @@ pub fn Encoder(comptime WriterType: type) type {
             }
         }
 
-        pub fn writeNil(self: *Self) !void {
+        pub fn writeNil(self: *Self) Error!void {
             return self.encoded_writer.writeByte(@intFromEnum(Type.Nil));
         }
 
-        pub fn writeBool(self: *Self, value: bool) !void {
+        pub fn writeBool(self: *Self, value: bool) Error!void {
             const byte = if (value) @intFromEnum(Type.True) else @intFromEnum(Type.False);
             return self.encoded_writer.writeByte(byte);
         }
 
-        pub fn writeInt(self: *Self, comptime T: type, value: T) !void {
+        pub fn writeInt(self: *Self, comptime T: type, value: T) Error!void {
             if (value >= 0x00 and value <= 0x7F)
                 return self.encoded_writer.writeByte(@intCast(value));
 
@@ -101,7 +103,7 @@ pub fn Encoder(comptime WriterType: type) type {
             try self.encoded_writer.writeInt(T, value, .big);
         }
 
-        pub fn writeFloat(self: *Self, comptime T: type, value: T) !void {
+        pub fn writeFloat(self: *Self, comptime T: type, value: T) Error!void {
             const format: u8 = switch (T) {
                 f32 => @intFromEnum(Type.Float32),
                 f64 => @intFromEnum(Type.Float64),
@@ -114,7 +116,7 @@ pub fn Encoder(comptime WriterType: type) type {
             try self.encoded_writer.writeAll(&bytes);
         }
 
-        pub fn writeStr(self: *Self, value: []const u8) !void {
+        pub fn writeStr(self: *Self, value: []const u8) Error!void {
             const format: u8 = switch (value.len) {
                 0...maxInt(u4) => {
                     try self.encoded_writer.writeByte(@intFromEnum(TypeMask.FixStr) | @as(u8, @intCast(value.len)));
@@ -133,7 +135,7 @@ pub fn Encoder(comptime WriterType: type) type {
             try self.encoded_writer.writeAll(value);
         }
 
-        pub fn writeBin(self: *Self, value: []const u8) !void {
+        pub fn writeBin(self: *Self, value: []const u8) Error!void {
             const format: u8 = switch (value.len) {
                 0...maxInt(u8) => @intFromEnum(Type.Bin8),
                 maxInt(u8) + 1...maxInt(u16) => @intFromEnum(Type.Bin16),
@@ -148,7 +150,7 @@ pub fn Encoder(comptime WriterType: type) type {
             try self.encoded_writer.writeAll(value);
         }
 
-        pub fn writeArray(self: *Self, value: anytype) !void {
+        pub fn writeArray(self: *Self, value: anytype) Error!void {
             const fields = meta.fields(@TypeOf(value));
             switch (fields.len) {
                 0...maxInt(u4) => {
@@ -180,9 +182,10 @@ pub fn Decoder(comptime ReaderType: type) type {
     return struct {
         encoded_reader: ReaderType,
 
+        pub const Error = ReaderType.Error || error {EndOfStream};
         const Self = @This();
 
-        pub fn read(self: *Self, comptime T: type) !T {
+        pub fn read(self: *Self, comptime T: type) Error!T {
             return switch (@typeInfo(T)) {
                 .bool => self.readBool(),
                 .int => try self.readInt(),
@@ -192,13 +195,13 @@ pub fn Decoder(comptime ReaderType: type) type {
             };
         }
 
-        pub fn readNil(self: *Self) !void {
+        pub fn readNil(self: *Self) Error!void {
             const format = try self.encoded_reader.readByte();
             if (format != @intFromEnum(Type.Nil))
                 unreachable;
         }
 
-        pub fn readBool(self: *Self) !bool {
+        pub fn readBool(self: *Self) Error!bool {
             const format = try self.encoded_reader.readByte();
             return switch (@as(Type, @enumFromInt(format))) {
                 .False => false,
@@ -207,7 +210,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             };
         }
 
-        pub fn readInt(self: *Self) !isize {
+        pub fn readInt(self: *Self) Error!isize {
             const format = try self.encoded_reader.readByte();
             if (format <= 0x7F)
                 return @intCast(format);
@@ -227,7 +230,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             };
         }
 
-        pub fn readFloat(self: *Self) !f64 {
+        pub fn readFloat(self: *Self) Error!f64 {
             const format = try self.encoded_reader.readByte();
 
             var buffer: [@sizeOf(f64)]u8 = undefined;
@@ -242,7 +245,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             return @bitCast(buffer);
         }
 
-        pub fn readStr(self: *Self, allocator: mem.Allocator) ![]u8 {
+        pub fn readStr(self: *Self, allocator: mem.Allocator) Error![]u8 {
             const format = try self.encoded_reader.readByte();
             const str_len = switch (@as(Type, @enumFromInt(format))) {
                 .Str8 => try self.encoded_reader.readByte(),
@@ -259,7 +262,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             return self.encoded_reader.readAllAlloc(allocator, str_len);
         }
 
-        pub fn readBin(self: *Self, allocator: mem.Allocator) ![]u8 {
+        pub fn readBin(self: *Self, allocator: mem.Allocator) Error![]u8 {
             const format = try self.encoded_reader.readByte();
             const bin_len = switch (@as(Type, @enumFromInt(format))) {
                 .Bin8 => try self.encoded_reader.readByte(),
@@ -271,7 +274,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             return self.encoded_reader.readAllAlloc(allocator, bin_len);
         }
 
-        pub fn readArray(self: *Self, comptime T: type) !T {
+        pub fn readArray(self: *Self, comptime T: type) Error!T {
             const format = try self.encoded_reader.readByte();
             const array_len = switch (@as(Type, @enumFromInt(format))) {
                 .Array16 => try self.encoded_reader.readInt(u16, .big),
