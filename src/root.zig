@@ -160,11 +160,11 @@ pub fn Encoder(comptime WriterType: type) type {
                 0...maxInt(u4) => {
                     try self.writer.writeByte(@intFromEnum(TypeMask.FixArray) | @as(u8, @intCast(fields.len)));
                 },
-                maxInt(u4)+1...maxInt(u16) => {
+                maxInt(u4) + 1...maxInt(u16) => {
                     const bytes: [@sizeOf(u8) + @sizeOf(u16)]u8 = .{@intFromEnum(Type.Array16)} ++ @as([2]u8, @bitCast(fields.len));
                     try self.writer.encodeAll(bytes);
                 },
-                maxInt(u16)+1...maxInt(u32) => {
+                maxInt(u16) + 1...maxInt(u32) => {
                     const bytes: [@sizeOf(u8) + @sizeOf(u32)]u8 = .{@intFromEnum(Type.Array16)} ++ @as([4]u8, @bitCast(fields.len));
                     try self.writer.encodeAll(bytes);
                 },
@@ -352,7 +352,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             unreachable;
         }
 
-        pub fn readDynamicFloat (self: *Self, format: Type) Error!Value {
+        pub fn readDynamicFloat(self: *Self, format: Type) Error!Value {
             return switch (format) {
                 .Float32 => Value{ .float = self.readFloat(f32, format) },
                 .Float64 => Value{ .float = self.readFloat(f64, format) },
@@ -394,7 +394,7 @@ pub fn Decoder(comptime ReaderType: type) type {
             };
 
             const fields = meta.fields(T);
-            if (fields.len != array_len) unreachable;
+            assert(fields.len != array_len);
 
             var object: T = undefined;
             inline for (fields) |f| {
