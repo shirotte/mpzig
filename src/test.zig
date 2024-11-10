@@ -1,73 +1,127 @@
+const mpzig = @import("root.zig");
 const std = @import("std");
 const testing = std.testing;
 const io = std.io;
-const mpzig = @import("root.zig");
+const maxInt = std.math.maxInt;
+const minInt = std.math.minInt;
 
-test "encode nil" {
+test "nil" {
     var buffer: [255]u8 = undefined;
     var fba = io.fixedBufferStream(&buffer);
     var encoder = mpzig.encoder(fba.writer());
-    
-    try encoder.writeNil();
+    var decoder = mpzig.decoder(testing.allocator, fba.reader());
+    defer decoder.deinit();
 
-    try expectFromatAndLength(fba, mpzig.Type.Nil, 1);
+    try encoder.encodeNil();
+    try testing.expect(fba.buffer[0] == @intFromEnum(mpzig.Type.Nil));
+    try testing.expect(fba.pos == 1);
+
+    fba.reset();
+    try decoder.decodeNil();
 }
 
-test "encode true" {
+test "bool true" {
     var buffer: [255]u8 = undefined;
     var fba = io.fixedBufferStream(&buffer);
     var encoder = mpzig.encoder(fba.writer());
-    
-    try encoder.writeBool(true);
+    var decoder = mpzig.decoder(testing.allocator, fba.reader());
+    defer decoder.deinit();
 
-    try expectFromatAndLength(fba, mpzig.Type.True, 1);
+    try encoder.encodeBool(true);
+    try testing.expect(fba.buffer[0] == @intFromEnum(mpzig.Type.True));
+    try testing.expect(fba.pos == 1);
+
+    fba.reset();
+    try testing.expect(true == try decoder.decodeBool());
 }
 
-test "encode false" {
+test "bool false" {
     var buffer: [255]u8 = undefined;
     var fba = io.fixedBufferStream(&buffer);
     var encoder = mpzig.encoder(fba.writer());
-    
-    try encoder.writeBool(false);
+    var decoder = mpzig.decoder(testing.allocator, fba.reader());
+    defer decoder.deinit();
 
-    try expectFromatAndLength(fba, mpzig.Type.False, 1);
+    try encoder.encodeBool(false);
+    try testing.expect(fba.buffer[0] == @intFromEnum(mpzig.Type.False));
+    try testing.expect(fba.pos == 1);
+
+    fba.reset();
+    try testing.expect(false == try decoder.decodeBool());
 }
 
-test "encode int" {
-    var buffer: [255]u8 = undefined;
-    var fba = io.fixedBufferStream(&buffer);
-    var encoder = mpzig.encoder(fba.writer());
-    
+test "int" {
+    try testingEncodeDecodeInt(i8);
+    try testingEncodeDecodeInt(i16);
+    try testingEncodeDecodeInt(i32);
+    try testingEncodeDecodeInt(i64);
+    try testingEncodeDecodeInt(u8);
+    try testingEncodeDecodeInt(u16);
+    try testingEncodeDecodeInt(u32);
+    try testingEncodeDecodeInt(u64);
+}
+
+test "float" {
+    try testingEncodeDecodeFloat(f32);
+    try testingEncodeDecodeFloat(f64);
+}
+
+test "str" {
+    try testingEncodeDecodeStr("codebase"); // upto 31 bytes
+    try testingEncodeDecodeStr("cat" ** 50); // upto 255 bytes
+    try testingEncodeDecodeStr("dog" ** 20000); // upto 64435 bytes
+
+    // Note: This test case allocated over 8Gb. So I can't test this :<
+    // try testingEncodeDecodeStr("connection" ** 420000000); // upto (2^32)-1 bytes
+}
+
+fn expectEncodeDecode(comptime T: type, value: T) !void {
+    var list = std.ArrayList(u8).init(testing.allocator);
+    defer list.deinit();
+
+    var encoder = mpzig.encoder(list.writer());
+    try encoder.encode(value);
+
+    var fbs = io.fixedBufferStream(list.items);
+    var decoder = mpzig.decoder(testing.allocator, fbs.reader());
+    defer decoder.deinit();
+    const actual = try decoder.decode(T);
+
+    try testing.expectEqual(value, actual);
+}
+
+fn testingEncodeDecodeInt(comptime T: type) !void {
     var prng = std.Random.DefaultPrng.init(testing.random_seed);
     const rand = prng.random();
-    
-    try encoder.writeInt(u0, rand.int(u0));
-    try encoder.writeInt(u1, rand.int(u1));
-    try encoder.writeInt(u7, rand.int(u7));
-    try encoder.writeInt(u8, rand.int(u8));
+
+    try expectEncodeDecode(T, 0);
+    try expectEncodeDecode(T, maxInt(u7));
+    try expectEncodeDecode(T, maxInt(T));
+    try expectEncodeDecode(T, minInt(T));
+    try expectEncodeDecode(T, rand.int(T));
 }
 
-test "encode float" {
-    var buffer: [255]u8 = undefined;
-    var fba = io.fixedBufferStream(&buffer);
-    var encoder = mpzig.encoder(fba.writer());
-    
+fn testingEncodeDecodeFloat(comptime T: type) !void {
     var prng = std.Random.DefaultPrng.init(testing.random_seed);
     const rand = prng.random();
 
-    try encoder.writeFloat(f32, rand.float(f32));
-    try encoder.writeFloat(f64, rand.float(f64));
+    try expectEncodeDecode(T, 0.0);
+    try expectEncodeDecode(T, -1.0);
+    try expectEncodeDecode(T, 1.0);
+    try expectEncodeDecode(T, rand.float(T));
 }
 
-test "encode str" { 
-    var buffer: [255]u8 = undefined;
-    var fba = io.fixedBufferStream(&buffer);
-    var encoder = mpzig.encoder(fba.writer());
+fn testingEncodeDecodeStr(str: []const u8) !void {
+    var list = std.ArrayList(u8).init(testing.allocator);
+    defer list.deinit();
 
-    try encoder.writeStr("All your codebase");
-}
+    var encoder = mpzig.encoder(list.writer());
+    try encoder.encode(str);
 
-fn expectFromatAndLength(fba: anytype, format: mpzig.Type, written_bytes: usize) !void {
-    try testing.expect(fba.buffer[0] == @intFromEnum(format));
-    try testing.expect(fba.pos == written_bytes);
+    var fbs = io.fixedBufferStream(list.items);
+    var decoder = mpzig.decoder(testing.allocator, fbs.reader());
+    defer decoder.deinit();
+    const actual = try decoder.decode([]u8);
+
+    try testing.expectEqualStrings(str, actual);
 }
