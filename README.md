@@ -28,3 +28,8 @@ str                                  | [] u8
 bin                                  | [] u8
 array                                | struct
 map                                  | struct
+
+
+## TODO
+
+Map, ext, timestamp
